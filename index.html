@@ -1325,15 +1325,31 @@ function controles(){
 }
 
 /* ---------- export ---------- */
+// Date de prise de vue écrite dans chaque image (EXIF), une seconde d'écart entre les slides :
+// la galerie et Instagram les rangent alors dans l'ordre du carrousel
+function dateExif(d){ const p=n=>String(n).padStart(2,'0'); return `${d.getFullYear()}:${p(d.getMonth()+1)}:${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`; }
+async function avecExif(blob,date){
+  const jpg=new Uint8Array(await blob.arrayBuffer());
+  if(jpg[0]!==0xFF||jpg[1]!==0xD8) return blob;
+  const t=new Uint8Array(128), v=new DataView(t.buffer), str=dateExif(date)+'\0';
+  t.set([0x49,0x49,0x2A,0x00]); v.setUint32(4,8,true);
+  const ent=(o,tag,type,cnt,val)=>{v.setUint16(o,tag,true);v.setUint16(o+2,type,true);v.setUint32(o+4,cnt,true);v.setUint32(o+8,val,true);};
+  v.setUint16(8,2,true); ent(10,0x0132,2,20,38); ent(22,0x8769,4,1,58); v.setUint32(34,0,true);
+  for(let i=0;i<20;i++){ t[38+i]=str.charCodeAt(i); t[88+i]=str.charCodeAt(i); t[108+i]=str.charCodeAt(i); }
+  v.setUint16(58,2,true); ent(60,0x9003,2,20,88); ent(72,0x9004,2,20,108); v.setUint32(84,0,true);
+  const app1=new Uint8Array(4+6+128); app1.set([0xFF,0xE1,0x00,0x88,0x45,0x78,0x69,0x66,0x00,0x00]); app1.set(t,10);
+  return new Blob([jpg.slice(0,2),app1,jpg.slice(2)],{type:'image/jpeg'});
+}
 async function fichiers(){
   busy(true,'Création des images…');
-  const total=totalSlides(), out=[];
+  const total=totalSlides(), out=[], t0=Date.now()-total*1000;
   const nom=(S.titre||'post').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g,'').replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'');
   for(let i=0;i<total;i++){
     const c=OffscreenCanvasOr(W,H), g=c.getContext('2d');
     dessinerIndex(g,i);
-    const b=await toBlobAny(c,'image/jpeg',0.95);
-    out.push(new File([b],`${nom}-${String(i+1).padStart(2,'0')}.jpg`,{type:'image/jpeg'}));
+    const quand=t0+i*1000;
+    const b=await avecExif(await toBlobAny(c,'image/jpeg',0.95),new Date(quand));
+    out.push(new File([b],`${nom}-${String(i+1).padStart(2,'0')}.jpg`,{type:'image/jpeg',lastModified:quand}));
   }
   busy(false); return out;
 }
